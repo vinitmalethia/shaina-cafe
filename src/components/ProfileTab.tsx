@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { auth, db, googleProvider } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 interface OrderHistoryItem {
@@ -81,6 +81,23 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
     }
   };
 
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result?.user) {
+          await ensureUserProfile(result.user);
+        }
+      })
+      .catch((error: any) => {
+        console.error('Google redirect authentication error:', error);
+        if (error.code === 'auth/unauthorized-domain') {
+          setAuthError('Google login needs this site added in Firebase authorized domains.');
+        } else {
+          setAuthError('Google sign-in could not finish. Please try again.');
+        }
+      });
+  }, []);
+
   // Handle email login & signup
   const handleEmailLogin = async () => {
     setAuthError('');
@@ -136,10 +153,15 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
       await ensureUserProfile(result.user);
     } catch (error: any) {
       console.error('Google authentication error:', error);
-      if (error.code === 'auth/popup-closed-by-user') {
-        setAuthError('Google sign-in was cancelled.');
-      } else if (error.code === 'auth/unauthorized-domain') {
-        setAuthError('This domain is not allowed for Google sign-in.');
+      if (error.code === 'auth/unauthorized-domain') {
+        setAuthError('Google login needs this site added in Firebase authorized domains.');
+      } else if (
+        error.code === 'auth/popup-blocked' ||
+        error.code === 'auth/popup-closed-by-user' ||
+        error.code === 'auth/cancelled-popup-request' ||
+        error.code === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        await signInWithRedirect(auth, googleProvider);
       } else {
         setAuthError('Google sign-in failed. Please try again.');
       }
