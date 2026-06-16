@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { auth, db, googleProvider } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 interface OrderHistoryItem {
@@ -149,19 +149,11 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
     setLoading(true);
 
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      await ensureUserProfile(result.user);
+      await signInWithRedirect(auth, googleProvider);
     } catch (error: any) {
       console.error('Google authentication error:', error);
       if (error.code === 'auth/unauthorized-domain') {
         setAuthError('Google login needs this site added in Firebase authorized domains.');
-      } else if (
-        error.code === 'auth/popup-blocked' ||
-        error.code === 'auth/popup-closed-by-user' ||
-        error.code === 'auth/cancelled-popup-request' ||
-        error.code === 'auth/operation-not-supported-in-this-environment'
-      ) {
-        await signInWithRedirect(auth, googleProvider);
       } else {
         setAuthError('Google sign-in failed. Please try again.');
       }
