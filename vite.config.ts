@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { randomUUID } from 'node:crypto';
 
 type StoredOrder = {
   id: string;
@@ -9,6 +10,9 @@ type StoredOrder = {
 
 const localOrders: StoredOrder[] = [];
 const orderClients = new Set<{ write: (chunk: string) => void }>();
+const adminSessions = new Set<string>();
+const ADMIN_EMAIL = 'vinit@gmail.com';
+const ADMIN_PASSWORD = '1234567890';
 
 const sendJson = (res: any, statusCode: number, data: unknown) => {
   res.statusCode = statusCode;
@@ -34,6 +38,20 @@ const readJsonBody = (req: any) => new Promise<any>((resolve, reject) => {
   req.on('error', reject);
 });
 
+const getCookieValue = (req: any, name: string) => {
+  const cookie = String(req.headers.cookie || '');
+  return cookie
+    .split(';')
+    .map(part => part.trim())
+    .find(part => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+};
+
+const isAdminRequest = (req: any) => {
+  const token = getCookieValue(req, 'shaina_admin_session');
+  return Boolean(token && adminSessions.has(token));
+};
+
 const broadcastOrders = () => {
   const payload = `data: ${JSON.stringify(localOrders)}\n\n`;
   orderClients.forEach(client => client.write(payload));
@@ -50,6 +68,42 @@ const localOrderApiPlugin = () => ({
     server.middlewares.use(async (req: any, res: any, next: any) => {
       const url = req.url?.split('?')[0];
       const orderId = getOrderIdFromUrl(url);
+
+      if (url === '/api/admin/session' && req.method === 'GET') {
+        sendJson(res, 200, { authenticated: isAdminRequest(req) });
+        return;
+      }
+
+      if (url === '/api/admin/login' && req.method === 'POST') {
+        try {
+          const body = await readJsonBody(req);
+          const email = String(body.email || '').trim().toLowerCase();
+          const password = String(body.password || '');
+
+          if (email !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) {
+            sendJson(res, 401, { error: 'Invalid admin credentials' });
+            return;
+          }
+
+          const token = randomUUID();
+          adminSessions.add(token);
+          res.setHeader('Set-Cookie', `shaina_admin_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+          sendJson(res, 200, { authenticated: true });
+        } catch (error) {
+          sendJson(res, 400, { error: 'Invalid login payload' });
+        }
+        return;
+      }
+
+      if (url === '/api/admin/logout' && req.method === 'POST') {
+        const token = getCookieValue(req, 'shaina_admin_session');
+        if (token) {
+          adminSessions.delete(token);
+        }
+        res.setHeader('Set-Cookie', 'shaina_admin_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+        sendJson(res, 200, { authenticated: false });
+        return;
+      }
 
       if (url === '/api/orders' && req.method === 'GET') {
         sendJson(res, 200, localOrders);

@@ -1,7 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { db, auth } from './firebase';
 import { collection, query, onSnapshot, doc, addDoc, updateDoc, increment } from 'firebase/firestore';
-import { onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInAnonymously, signOut } from 'firebase/auth';
 
 // Component Imports
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -91,6 +91,18 @@ const updateServerOrderStatus = async (orderId: string, status: Order['status'])
   }
 
   return response.json() as Promise<Order>;
+};
+
+const getAdminSession = async () => {
+  try {
+    const response = await fetch('/api/admin/session');
+    if (!response.ok) return false;
+
+    const data = await response.json();
+    return Boolean(data.authenticated);
+  } catch {
+    return false;
+  }
 };
 
 
@@ -1192,11 +1204,14 @@ const AdminLogin = ({ onLogin }: { onLogin: () => void }) => {
     setLoading(true);
 
     try {
-      const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
 
-      if (credential.user.email !== ADMIN_EMAIL) {
-        await signOut(auth);
-        setError('This account is not allowed to access admin.');
+      if (!response.ok) {
+        setError('Invalid admin email or password.');
         return;
       }
 
@@ -1497,13 +1512,13 @@ export default function App() {
       window.history.pushState({}, '', '/admin');
     }
     setShowModal(null);
-    setIsAdminAuthenticated(auth.currentUser?.email === ADMIN_EMAIL);
     setCurrentView('admin');
   };
 
   // Load user data on startup
   useEffect(() => {
     if (isAdminRoute()) {
+      getAdminSession().then(setIsAdminAuthenticated);
       setCurrentView('admin');
       setWelcomeDismissed(true);
       setMenuRevealed(true);
@@ -1573,13 +1588,10 @@ export default function App() {
   // Sync Firebase authentication state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      const isAdminUser = user?.email === ADMIN_EMAIL;
-      setIsAdminAuthenticated(isAdminUser);
-
-      const signedInCustomer = user && !user.isAnonymous && !isAdminUser ? user : null;
+      const signedInCustomer = user && !user.isAnonymous ? user : null;
       setGoogleUser(signedInCustomer);
 
-      if (signedInCustomer && !isAdminUser) {
+      if (signedInCustomer) {
         // Sync user details with Firestore
         const userDocRef = doc(db, 'users', signedInCustomer.uid);
         
@@ -2067,7 +2079,12 @@ export default function App() {
     }
   };
 
-  const handleAdminSignOut = () => {
+  const handleAdminSignOut = async () => {
+    try {
+      await fetch('/api/admin/logout', { method: 'POST' });
+    } catch (error) {
+      console.warn('Admin logout request failed:', error);
+    }
     signOut(auth);
     localStorage.removeItem('shaina_admin_session');
     localStorage.removeItem('shaina_customer_name');
