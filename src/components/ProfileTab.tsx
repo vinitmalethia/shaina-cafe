@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { auth, db } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { auth, db, googleProvider } from '../firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 interface OrderHistoryItem {
@@ -65,6 +65,22 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState('');
 
+  const ensureUserProfile = async (user: any) => {
+    const userDocRef = doc(db, 'users', user.uid);
+    const userSnap = await getDoc(userDocRef);
+
+    if (!userSnap.exists()) {
+      await setDoc(userDocRef, {
+        uid: user.uid,
+        name: user.displayName || guestName || 'Loyal Customer',
+        email: user.email,
+        photoURL: user.photoURL || null,
+        points: 0,
+        createdAt: new Date().toISOString()
+      });
+    }
+  };
+
   // Handle email login & signup
   const handleEmailLogin = async () => {
     setAuthError('');
@@ -96,19 +112,7 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
         }
       }
 
-      const user = userCredential.user;
-      const userDocRef = doc(db, 'users', user.uid);
-      const userSnap = await getDoc(userDocRef);
-      
-      if (!userSnap.exists()) {
-        await setDoc(userDocRef, {
-          uid: user.uid,
-          name: guestName || 'Loyal Customer',
-          email: user.email,
-          points: 0,
-          createdAt: new Date().toISOString()
-        });
-      }
+      await ensureUserProfile(userCredential.user);
     } catch (error: any) {
       console.error('Email authentication error:', error);
       if (error.code === 'auth/wrong-password') {
@@ -123,19 +127,31 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
     }
   };
 
-  // Direct Admin Login Button Handler
-  const handleAdminDirectLogin = async () => {
+  const handleGoogleLogin = async () => {
     setAuthError('');
     setLoading(true);
+
     try {
-      await signInWithEmailAndPassword(auth, 'vinit@gmail.com', '1234567890');
-      onOpenAdmin();
+      const result = await signInWithPopup(auth, googleProvider);
+      await ensureUserProfile(result.user);
     } catch (error: any) {
-      console.error('Direct admin login error:', error);
-      setAuthError('Admin login failed. Check the admin account credentials.');
+      console.error('Google authentication error:', error);
+      if (error.code === 'auth/popup-closed-by-user') {
+        setAuthError('Google sign-in was cancelled.');
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setAuthError('This domain is not allowed for Google sign-in.');
+      } else {
+        setAuthError('Google sign-in failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  // Direct Admin Login Button Handler
+  const handleAdminDirectLogin = async () => {
+    setAuthError('');
+    onOpenAdmin();
   };
 
 
@@ -475,6 +491,44 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
               <button
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                style={{
+                  width: '100%',
+                  backgroundColor: '#FFFFFF',
+                  color: 'var(--color-secondary)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '11px',
+                  fontFamily: 'var(--font-headline)',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: loading ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  boxShadow: 'var(--shadow-sm)'
+                }}
+              >
+                <span style={{
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '50%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'conic-gradient(from -45deg, #4285F4 0 25%, #34A853 0 50%, #FBBC05 0 75%, #EA4335 0 100%)',
+                  color: '#FFFFFF',
+                  fontSize: '12px',
+                  fontWeight: 900,
+                  lineHeight: 1
+                }}>
+                  G
+                </span>
+                Continue with Google
+              </button>
+              <button
                 onClick={handleEmailLogin}
                 disabled={loading}
                 style={{
@@ -513,7 +567,7 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
                   gap: '6px'
                 }}
               >
-                <span>🛠️</span> Admin Login (vinit@gmail.com)
+                <span>🛠️</span> Admin Portal
               </button>
             </div>
           </div>
