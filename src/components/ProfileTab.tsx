@@ -77,15 +77,7 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
     try {
       // Check if it's the admin credentials
       if (email.trim() === 'vinit@gmail.com' && password.trim() === '1234567890') {
-        try {
-          await signInWithEmailAndPassword(auth, 'vinit@gmail.com', '1234567890');
-        } catch (signInErr: any) {
-          if (signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential') {
-            await createUserWithEmailAndPassword(auth, 'vinit@gmail.com', '1234567890');
-          } else {
-            throw signInErr;
-          }
-        }
+        await signInWithEmailAndPassword(auth, 'vinit@gmail.com', '1234567890');
         setLoading(false);
         onOpenAdmin();
         return;
@@ -136,20 +128,11 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
     setAuthError('');
     setLoading(true);
     try {
-      try {
-        await signInWithEmailAndPassword(auth, 'vinit@gmail.com', '1234567890');
-      } catch (signInErr: any) {
-        if (signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential') {
-          await createUserWithEmailAndPassword(auth, 'vinit@gmail.com', '1234567890');
-        } else {
-          throw signInErr;
-        }
-      }
+      await signInWithEmailAndPassword(auth, 'vinit@gmail.com', '1234567890');
       onOpenAdmin();
     } catch (error: any) {
       console.error('Direct admin login error:', error);
-      // Fallback: directly redirect to admin view even if network fails for instant testing
-      onOpenAdmin();
+      setAuthError('Admin login failed. Check the admin account credentials.');
     } finally {
       setLoading(false);
     }

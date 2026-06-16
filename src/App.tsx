@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { db, auth } from './firebase';
 import { collection, query, onSnapshot, doc, addDoc, updateDoc, increment } from 'firebase/firestore';
-import { onAuthStateChanged, signInAnonymously, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInAnonymously, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // Component Imports
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -49,6 +49,8 @@ interface Order {
   createdAt: string;
   userId?: string | null;
 }
+
+const ADMIN_EMAIL = 'vinit@gmail.com';
 
 const sortOrdersNewestFirst = (orders: Order[]) =>
   [...orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1178,9 +1180,172 @@ const ensureOrderAuth = async () => {
   return credential.user;
 };
 
+const AdminLogin = ({ onLogin }: { onLogin: () => void }) => {
+  const [email, setEmail] = useState(ADMIN_EMAIL);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+      if (credential.user.email !== ADMIN_EMAIL) {
+        await signOut(auth);
+        setError('This account is not allowed to access admin.');
+        return;
+      }
+
+      onLogin();
+    } catch (err) {
+      console.error('Admin login failed:', err);
+      setError('Invalid admin email or password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#FDFCFA',
+      padding: '24px',
+      fontFamily: 'var(--font-body)',
+      color: 'var(--color-secondary)'
+    }}>
+      <form onSubmit={handleSubmit} style={{
+        width: '100%',
+        maxWidth: '420px',
+        backgroundColor: '#FFFFFF',
+        border: '1px solid var(--color-border)',
+        borderRadius: '16px',
+        boxShadow: 'var(--shadow-lg)',
+        padding: '32px'
+      }}>
+        <div style={{
+          width: '48px',
+          height: '48px',
+          borderRadius: '50%',
+          backgroundColor: '#2D1F17',
+          color: '#C89B5B',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontFamily: 'var(--font-headline)',
+          fontWeight: 900,
+          fontSize: '22px',
+          marginBottom: '18px'
+        }}>
+          S
+        </div>
+        <p style={{
+          margin: '0 0 6px 0',
+          color: '#A57A42',
+          fontSize: '12px',
+          fontWeight: 800,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase'
+        }}>
+          Admin Access
+        </p>
+        <h1 style={{
+          margin: '0 0 24px 0',
+          fontFamily: 'var(--font-headline)',
+          fontSize: '28px',
+          lineHeight: 1.1
+        }}>
+          Shaina Cafe Portal
+        </h1>
+
+        <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, marginBottom: '8px' }}>
+          Email
+        </label>
+        <input
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          autoComplete="username"
+          style={{
+            width: '100%',
+            border: '1px solid var(--color-border)',
+            borderRadius: '12px',
+            padding: '13px 14px',
+            marginBottom: '16px',
+            fontSize: '15px',
+            outline: 'none',
+            boxSizing: 'border-box'
+          }}
+        />
+
+        <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, marginBottom: '8px' }}>
+          Password
+        </label>
+        <input
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          autoComplete="current-password"
+          style={{
+            width: '100%',
+            border: '1px solid var(--color-border)',
+            borderRadius: '12px',
+            padding: '13px 14px',
+            fontSize: '15px',
+            outline: 'none',
+            boxSizing: 'border-box'
+          }}
+        />
+
+        {error && (
+          <div style={{
+            marginTop: '14px',
+            padding: '10px 12px',
+            borderRadius: '10px',
+            backgroundColor: '#FEE2E2',
+            color: '#B91C1C',
+            fontSize: '13px',
+            fontWeight: 700
+          }}>
+            {error}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            width: '100%',
+            marginTop: '22px',
+            border: 'none',
+            borderRadius: '12px',
+            backgroundColor: '#2D1F17',
+            color: '#FFFFFF',
+            padding: '14px 18px',
+            fontFamily: 'var(--font-headline)',
+            fontSize: '15px',
+            fontWeight: 800,
+            cursor: loading ? 'wait' : 'pointer',
+            opacity: loading ? 0.75 : 1
+          }}
+        >
+          {loading ? 'Signing in...' : 'Sign In'}
+        </button>
+      </form>
+    </div>
+  );
+};
+
 export default function App() {
   // Routing & View States
   const [currentView, setCurrentView] = useState<'welcome' | 'menu' | 'admin'>('welcome');
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [currentSubView, setCurrentSubView] = useState<'categories' | 'items'>('categories');
   const [currentGroup, setCurrentGroup] = useState<'Coffee' | 'Pastries' | 'Brunch' | 'Tea' | null>(null);
@@ -1332,6 +1497,7 @@ export default function App() {
       window.history.pushState({}, '', '/admin');
     }
     setShowModal(null);
+    setIsAdminAuthenticated(auth.currentUser?.email === ADMIN_EMAIL);
     setCurrentView('admin');
   };
 
@@ -1407,10 +1573,13 @@ export default function App() {
   // Sync Firebase authentication state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      const signedInCustomer = user && !user.isAnonymous ? user : null;
+      const isAdminUser = user?.email === ADMIN_EMAIL;
+      setIsAdminAuthenticated(isAdminUser);
+
+      const signedInCustomer = user && !user.isAnonymous && !isAdminUser ? user : null;
       setGoogleUser(signedInCustomer);
 
-      if (signedInCustomer) {
+      if (signedInCustomer && !isAdminUser) {
         // Sync user details with Firestore
         const userDocRef = doc(db, 'users', signedInCustomer.uid);
         
@@ -1900,6 +2069,7 @@ export default function App() {
 
   const handleAdminSignOut = () => {
     signOut(auth);
+    localStorage.removeItem('shaina_admin_session');
     localStorage.removeItem('shaina_customer_name');
     localStorage.removeItem('shaina_table_number');
     localStorage.removeItem('shaina_active_order_id');
@@ -1908,6 +2078,7 @@ export default function App() {
     setGuestTable(7);
     setActiveOrderId(null);
     setCart({});
+    setIsAdminAuthenticated(false);
     setWelcomeDismissed(false);
     setMenuRevealed(false);
     setIntroDone(false);
@@ -1917,6 +2088,10 @@ export default function App() {
   };
 
   if (currentView === 'admin') {
+    if (!isAdminAuthenticated) {
+      return <AdminLogin onLogin={() => setIsAdminAuthenticated(true)} />;
+    }
+
     return (
       <AdminDashboard
         orders={allOrders}
