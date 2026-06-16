@@ -77,6 +77,20 @@ const createServerFallbackOrder = async (orderPayload: Omit<Order, 'id'> & Recor
   return response.json() as Promise<Order>;
 };
 
+const updateServerOrderStatus = async (orderId: string, status: Order['status']) => {
+  const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Local order server returned ${response.status}`);
+  }
+
+  return response.json() as Promise<Order>;
+};
+
 
 
 const SEED_MENU_DATA = [
@@ -1486,8 +1500,14 @@ export default function App() {
       filteredLocal.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       localOrders.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       
-      setOrdersHistory(filteredLocal);
-      setAllOrders(localOrders);
+      setOrdersHistory(prev => {
+        const sharedLocalHistory = prev.filter(order => order.id.startsWith('local-server-'));
+        return mergeOrdersById(filteredLocal, sharedLocalHistory);
+      });
+      setAllOrders(prev => {
+        const sharedLocalOrders = prev.filter(order => order.id.startsWith('local-server-'));
+        return mergeOrdersById(localOrders, sharedLocalOrders);
+      });
     });
 
     return unsubscribe;
@@ -1853,6 +1873,17 @@ export default function App() {
       if (activeOrderId === orderId) {
         setActiveOrder(prev => prev ? { ...prev, status } : null);
       }
+
+      if (orderId.startsWith('local-server-')) {
+        try {
+          await updateServerOrderStatus(orderId, status);
+        } catch (err) {
+          console.error("Failed to update shared local order status:", err);
+          showToast("⚠️ Status changed here, but sync failed");
+          return;
+        }
+      }
+
       showToast(`Order status updated to ${status}`);
       return;
     }

@@ -39,11 +39,17 @@ const broadcastOrders = () => {
   orderClients.forEach(client => client.write(payload));
 };
 
+const getOrderIdFromUrl = (url = '') => {
+  const match = url.match(/^\/api\/orders\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+};
+
 const localOrderApiPlugin = () => ({
   name: 'local-order-api',
   configureServer(server: any) {
     server.middlewares.use(async (req: any, res: any, next: any) => {
       const url = req.url?.split('?')[0];
+      const orderId = getOrderIdFromUrl(url);
 
       if (url === '/api/orders' && req.method === 'GET') {
         sendJson(res, 200, localOrders);
@@ -77,6 +83,29 @@ const localOrderApiPlugin = () => ({
           sendJson(res, 201, order);
         } catch (error) {
           sendJson(res, 400, { error: 'Invalid order payload' });
+        }
+        return;
+      }
+
+      if (orderId && req.method === 'PATCH') {
+        try {
+          const body = await readJsonBody(req);
+          const orderIndex = localOrders.findIndex(order => order.id === orderId);
+
+          if (orderIndex === -1) {
+            sendJson(res, 404, { error: 'Order not found' });
+            return;
+          }
+
+          localOrders[orderIndex] = {
+            ...localOrders[orderIndex],
+            ...body,
+            id: orderId
+          };
+          broadcastOrders();
+          sendJson(res, 200, localOrders[orderIndex]);
+        } catch (error) {
+          sendJson(res, 400, { error: 'Invalid order update payload' });
         }
         return;
       }
