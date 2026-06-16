@@ -1283,27 +1283,28 @@ export default function App() {
       }
     };
 
-    fetchServerOrders();
+	    fetchServerOrders();
+	    const intervalId = window.setInterval(fetchServerOrders, 2000);
+	    const eventSource = typeof EventSource !== 'undefined' ? new EventSource('/api/orders/stream') : null;
 
-    if (typeof EventSource === 'undefined') {
-      const intervalId = window.setInterval(fetchServerOrders, 2500);
-      return () => window.clearInterval(intervalId);
-    }
+	    if (eventSource) {
+	      eventSource.onmessage = event => {
+	        try {
+	          applyServerOrders(JSON.parse(event.data));
+	        } catch (error) {
+	          console.warn('Local server order stream parse failed:', error);
+	        }
+	      };
+	      eventSource.onerror = () => {
+	        fetchServerOrders();
+	      };
+	    }
 
-    const eventSource = new EventSource('/api/orders/stream');
-    eventSource.onmessage = event => {
-      try {
-        applyServerOrders(JSON.parse(event.data));
-      } catch (error) {
-        console.warn('Local server order stream parse failed:', error);
-      }
-    };
-    eventSource.onerror = () => {
-      fetchServerOrders();
-    };
-
-    return () => eventSource.close();
-  }, [googleUser]);
+	    return () => {
+	      window.clearInterval(intervalId);
+	      eventSource?.close();
+	    };
+	  }, [googleUser]);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -1466,8 +1467,14 @@ export default function App() {
       historyList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       unfilteredList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       
-      setOrdersHistory(historyList);
-      setAllOrders(unfilteredList);
+      setOrdersHistory(prev => {
+        const sharedLocalHistory = prev.filter(order => order.id.startsWith('local-server-'));
+        return mergeOrdersById(historyList, sharedLocalHistory);
+      });
+      setAllOrders(prev => {
+        const sharedLocalOrders = prev.filter(order => order.id.startsWith('local-server-'));
+        return mergeOrdersById(unfilteredList, sharedLocalOrders);
+      });
     }, (error) => {
       console.warn("Firestore history listen failed, loading local orders:", error);
       const localOrdersStr = localStorage.getItem('shaina_local_orders');
@@ -1692,13 +1699,6 @@ export default function App() {
         };
       });
 
-      let orderAuthUser = auth.currentUser;
-      try {
-        orderAuthUser = await ensureOrderAuth();
-      } catch (err) {
-        console.warn("Anonymous auth failed, using local server order fallback:", err);
-      }
-
       const orderPayload = {
         customerName: name,
         customerPhone: phone,
@@ -1709,33 +1709,39 @@ export default function App() {
         status: 'received' as const,
         createdAt: new Date().toISOString(),
         userId: googleUser ? googleUser.uid : null,
-        createdByUid: orderAuthUser?.uid || null,
+        createdByUid: auth.currentUser?.uid || null,
         isGuestOrder: !googleUser
       };
 
-      // Add Order to Firestore with a local fallback if offline/permission error
+      // Save to the same-network local order server first so mobile orders appear on admin immediately.
       let newOrderId = '';
       let savedOrder: Order | null = null;
       try {
-        if (!orderAuthUser) {
-          throw new Error("Firebase auth unavailable");
-        }
-
+        savedOrder = await createServerFallbackOrder(orderPayload);
+        newOrderId = savedOrder.id;
+      } catch (err) {
+        console.warn("Local order server failed, trying Firestore:", err);
         try {
+          const orderAuthUser = await promiseWithTimeout(
+            ensureOrderAuth(),
+            3000,
+            "Firebase auth timed out"
+          );
+          const firestorePayload = {
+            ...orderPayload,
+            createdByUid: orderAuthUser.uid
+          };
           const docRef = await promiseWithTimeout(
-            addDoc(collection(db, 'orders'), orderPayload),
-            10000,
+            addDoc(collection(db, 'orders'), firestorePayload),
+            7000,
             "Firestore write timed out"
           );
           newOrderId = docRef.id;
+          savedOrder = { id: docRef.id, ...firestorePayload };
         } catch (firestoreErr) {
-          console.warn("Firestore order placement failed, using local order server:", firestoreErr);
-          savedOrder = await createServerFallbackOrder(orderPayload);
-          newOrderId = savedOrder.id;
+          console.warn("Shared order placement failed, falling back to this device only:", firestoreErr);
+          newOrderId = 'local-' + Date.now();
         }
-      } catch (err) {
-        console.warn("Shared order placement failed, falling back to this device only:", err);
-        newOrderId = 'local-' + Date.now();
       }
 
       // Accrue Loyalty Points (₹100 spent = 10 points)
